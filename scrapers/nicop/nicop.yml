@@ -1,0 +1,9 @@
+name: nicop
+# requires: py_common
+
+sceneByFragment:
+  action: script
+  script:
+    - python
+    - nicop.py
+# Last Updated June 27, 2025

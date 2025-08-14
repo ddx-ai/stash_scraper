@@ -1,0 +1,10 @@
+id: nicop
+name: nicop
+metadata: {}
+version: 1.0
+date: "2025-06-14 00:00:00"
+requires: []
+source_repository: https://stashapp.github.io/CommunityScrapers/stable/index.yml
+files:
+- nicop.yml
+- nicop.py
