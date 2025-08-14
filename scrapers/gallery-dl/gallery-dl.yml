@@ -1,0 +1,10 @@
+name: gallery-dl
+# requires: py_common
+
+imageByFragment:
+    action: script
+    script:
+     - python
+     - gallery-dl.py
+
+# Last Updated February XX, 2025
