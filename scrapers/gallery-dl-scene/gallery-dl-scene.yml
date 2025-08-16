@@ -1,7 +1,7 @@
 name: gallery-dl-scene
 # requires: py_common
 
-sceneByFragment::
+sceneByFragment:
     action: script
     script:
      - python
