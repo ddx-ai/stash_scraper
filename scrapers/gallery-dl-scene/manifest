@@ -1,0 +1,10 @@
+id: gallery-dl-scene
+name: gallery-dl-scene
+metadata: {}
+version: 1.0
+date: "2025-08-13 00:00:00"
+requires: []
+source_repository: https://ddx-ai.github.io/stash_scraper/main/index.yml
+files:
+- gallery-dl-scene.yml
+- gallery-dl-scene.py

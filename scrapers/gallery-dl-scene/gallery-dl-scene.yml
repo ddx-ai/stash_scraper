@@ -1,0 +1,10 @@
+name: gallery-dl-scene
+# requires: py_common
+
+sceneByFragment::
+    action: script
+    script:
+     - python
+     - gallery-dl-scene.py
+
+# Last Updated February XX, 2025

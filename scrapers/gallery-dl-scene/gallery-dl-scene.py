@@ -17,33 +17,33 @@ from py_common import log
 ## .info.json or .json extension. JSON files will be taken from the media's folder first, and if not
 ## present there a suitably named JSON file in the below directory will be used.
 ## Image Scraper
-## Code,Date,Details,Performers (see Performer fields),Photographer,Rating,Studio (see Studio Fields),Tags (see Tag fields),Title,URLs
+## Code,Date,Details,Director,Groups,Image,Performers (see Performer fields),Studio (see Studio Fields),Tags (see Tag fields),Title,URLs
 
 alternate_json_dir = ""
 
 
-def image_from_json(image_id):
+def scene_from_json(scene_id):
     response = graphql.callGraphQL(
     """
-    query FilenameByimageId($id: ID){
-      findImage(id: $id){
+    query FilenameBysceneId($id: ID){
+      FindScene(id: $id){
         files {
           path
         }
       }
     }""",
-        {"id": image_id},
+        {"id": scene_id},
     )
-    log.debug(f"ID: {image_id}")
+    log.debug(f"ID: {scene_id}")
     assert response is not None
-    file = next(iter(response["findImage"]["files"]), None)
+    file = next(iter(response["findscene"]["files"]), None)
     if not file:
-        log.debug(f"No files found for scene {image_id}")
+        log.debug(f"No files found for scene {scene_id}")
         return None
 
     file_path = Path(file["path"])
     log.debug(f"file_path: {file_path}")
-    json_files = [file_path.with_suffix(suffix) for suffix in (".info.json", ".json",".png.json",".jpeg.json",".jpg.json",".webp.json")]
+    json_files = [file_path.with_suffix(suffix) for suffix in (".info.json", ".json",".mp4.json",".webm.json",".mkv.json")]
     thumbs_files = [file_path.with_suffix(suffix) for suffix in (".webp",".jpg",".jpeg")]
     if alternate_json_dir:
         json_files += [Path(alternate_json_dir) / p.name for p in json_files]
@@ -72,11 +72,15 @@ def image_from_json(image_id):
  ##   if thumbnail := yt_json.get("thumbnail"):
  ##       if not thumb_file:
  ##           scene["image"] = thumbnail
-    if url := yt_json.get("url"):
-        scene["urls"] = [url]
-    elif url := yt_json.get("file_url"):
-        scene["urls"] = [url]
-                
+    url=[]
+    if user_id := yt_json.get("user",{}).get("ID"):
+        url.append(f"https://www.pixiv.net/users/{user_id}")
+    if temp_url := yt_json.get("url"):
+        url.append(temp_url)
+    elif temp_url := yt_json.get("file_url"):
+        url.append(temp_url)
+    scene["urls"] = [url]
+    
     if studio := yt_json.get("user",{}).get("name"):
         scene["Studio"] = {"name":studio}
     elif studio := yt_json.get("author",{}).get("display_name"):
@@ -120,7 +124,7 @@ if __name__ == "__main__":
     try:
         js = json.loads(input)
         image_id = js["id"]
-        ret = image_from_json(image_id)
+        ret = scene_from_json(scene_id)
         log.debug(json.dumps(ret))
         print(json.dumps(ret))
     except json.decoder.JSONDecodeError:
