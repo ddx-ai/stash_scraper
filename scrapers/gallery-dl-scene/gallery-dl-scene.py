@@ -123,7 +123,7 @@ if __name__ == "__main__":
     #log.debug(f"input2: '{input2}'")
     try:
         js = json.loads(input)
-        image_id = js["id"]
+        scene_id = js["id"]
         ret = scene_from_json(scene_id)
         log.debug(json.dumps(ret))
         print(json.dumps(ret))
