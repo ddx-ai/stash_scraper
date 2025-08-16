@@ -73,13 +73,13 @@ def scene_from_json(scene_id):
  ##       if not thumb_file:
  ##           scene["image"] = thumbnail
     url=[]
-    if user_id := yt_json.get("user",{}).get("ID"):
+    if user_id := yt_json.get("user",{}).get("id"):
         url.append(f"https://www.pixiv.net/users/{user_id}")
     if temp_url := yt_json.get("url"):
         url.append(temp_url)
     elif temp_url := yt_json.get("file_url"):
         url.append(temp_url)
-    scene["urls"] = [url]
+    scene["urls"] = url
     
     if studio := yt_json.get("user",{}).get("name"):
         scene["Studio"] = {"name":studio}
