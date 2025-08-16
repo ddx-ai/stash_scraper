@@ -26,7 +26,7 @@ def scene_from_json(scene_id):
     response = graphql.callGraphQL(
     """
     query FilenameBysceneId($id: ID){
-      FindScene(id: $id){
+      findScene(id: $id){
         files {
           path
         }
@@ -36,7 +36,7 @@ def scene_from_json(scene_id):
     )
     log.debug(f"ID: {scene_id}")
     assert response is not None
-    file = next(iter(response["findscene"]["files"]), None)
+    file = next(iter(response["findScene"]["files"]), None)
     if not file:
         log.debug(f"No files found for scene {scene_id}")
         return None
