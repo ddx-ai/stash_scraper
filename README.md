@@ -13,7 +13,7 @@ _This assumes you already know how to create scrapers for Stash. If you don't, f
 Now add your scrapers to [scrapers](/scrapers) directory and they will be automatically published to the source index.
 
 Source index URL: [`https://ddx-ai.github.io/stash_scraper/main/index.yml`](https://ddx-ai.github.io/stash_scraper/main/index.yml)
-
+python -m pip install stashapp-tools requests cloudscraper beautifulsoup4 lxml
 ## Share your scrapers
 
 - [Create a new topic](https://discourse.stashapp.cc/t/-/146) for your scraper on the community forum.
