@@ -1,185 +1,108 @@
 import json
-import os
 import sys
-import datetime
-import traceback
-import re
+import os
 from pathlib import Path
 
-# --- Docker/Linux環境対策: スクリプトのディレクトリを検索パスの最優先に追加 ---
-current_dir = os.path.dirname(os.path.realpath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+# Stashのpy_commonライブラリをインポートできるようにパスを追加
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "py_common"))
 
-try:
-    from py_common import graphql
-    from py_common import log
-except ImportError:
-    # py_commonが見つからない場合のフォールバック（デバッグ用）
-    class DummyLog:
-        def debug(self, msg): print(f"DEBUG: {msg}")
-    log = DummyLog()
-    print("Error: py_common.py not found in the same directory.")
-
-def image_from_json(image_id):
-    # GraphQLクエリ: ID! (必須型) に修正し、最新のStash APIに準拠
-    query = """
-    query FilenameByimageId($id: ID!) {
-      findImage(id: $id) {
-        files {
-          path
-        }
-      }
-    }
+def get_image_data(file_path):
     """
-    response = graphql.callGraphQL(query, {"id": image_id})
+    gallery-dlが生成した.jsonファイルからデータを読み込み、
+    Stashが理解できるJSON形式に変換して出力する。
+    """
+    json_path = Path(str(file_path) + ".json")
     
-    if not response or not response.get("findImage"):
-        log.debug(f"Image ID {image_id} がデータベースに見つかりません。")
-        return None
+    # 戻り値の基本構造
+    scene = {
+        "title": "",
+        "url": "",
+        "date": "",
+        "details": "",
+        "tags": []
+    }
 
-    files = response["findImage"].get("files", [])
-    if not files:
-        log.debug(f"Image ID {image_id} に関連付けられたファイルパスがありません。")
-        return None
+    if not json_path.exists():
+        # JSONがない場合はファイル名からタイトルだけ推測して返す
+        scene["title"] = Path(file_path).stem
+        return scene
 
- # Stash上のパスを取得
-    file_path_str = files[0].get("path")
-    
-    # --- OS互換性を保った絶対パス解決 ---
-    if os.name == 'nt':
-        # Windows環境の場合
-        # \ が / に混在していても Path オブジェクトが適切に処理します
-        file_path = Path(file_path_str)
-    else:
-        # Linux / Docker (Alpine) 環境の場合
-        if not file_path_str.startswith('/'):
-            # 先頭が / でなければ付与して絶対パス化する
-            file_path_str = '/' + file_path_str
-        file_path = Path(file_path_str)
-
-    log.debug(f"Resolved absolute path: {file_path}")
-    
-    # --- JSONファイル探索ロジック (拡張子.json ルールに完全準拠) ---
-    # Linux環境の大文字小文字を考慮し、複数のパターンをチェック
-    json_candidates = [
-        Path(file_path_str + ".json"),          # 71698513_p0.png.json (今回の本命)
-        file_path.with_suffix(".json"),         # 71698513_p0.json
-        Path(file_path_str + ".JSON"),          # 大文字拡張子
-        file_path.with_suffix(".info.json")      # 互換性用
-    ]
-
-    json_file = next((f for f in json_candidates if f.exists()), None)
-
-    if not json_file:
-        log.debug(f"JSONが見つかりません。試行パス: {[str(p) for p in json_candidates]}")
-        return None
-
-    log.debug(f"JSONファイルを読み込みます: {json_file}")
-    
     try:
-        # Docker/Linux環境での文字化けを防ぐためutf-8を明示
-        yt_json = json.loads(json_file.read_text(encoding="utf-8"))
-    except Exception as e:
-        log.debug(f"JSON読み込み失敗: {e}")
-        return None
-
-    # --- Stash用データ構造の構築 ---
-    scene = {}
-
-    # Title
-    if title := yt_json.get("title"):
-        scene["title"] = title
-
-    # URLs (Pixivユーザーページと作品ページ)
-    urls = []
-    if user_id := yt_json.get("user", {}).get("id"):
-        urls.append(f"https://www.pixiv.net/users/{user_id}")
-    if target_url := yt_json.get("url"):
-        urls.append(target_url)
-    scene["urls"] = urls
-                
-    # Studio & Performers (作者名をマッピング)
-    user_name = yt_json.get("user", {}).get("name") or yt_json.get("author", {}).get("name")
-    if user_name:
-        scene["studio"] = {"name": user_name}
-        scene["performers"] = [{"name": user_name}]
+        with open(json_path, 'r', encoding='utf-8') as f:
+            yt_json = json.load(f)
         
-# --- Tags 抽出ロジック (変数名を tags_data に統一) ---
-    tags_data = []
-    
-    # 1. Pixiv JSON内の "tags" フィールドを確認
-    raw_tags = yt_json.get("tags")
-    
-    if isinstance(raw_tags, list):
-        for t in raw_tags:
-            if t:
-                tags_data.append({"name": str(t).strip()})
-    elif isinstance(raw_tags, str):
-        for t in raw_tags.split(','):
-            if t:
-                tags_data.append({"name": t.strip()})
+        # デバッグ用ログ出力（Stashのログに表示されます）
+        print(f"JSONファイルを読み込みます: {json_path}", file=sys.stderr)
 
-    # 2. Rating情報をタグとして追加 (ここでの変数名を tags_data に修正)
-    if rating := yt_json.get("rating"):
-        tags_data.append({"name": str(rating).strip()})
+        # 1. 基本情報の抽出
+        scene["title"] = yt_json.get("title") or yt_json.get("filename") or Path(file_path).stem
+        
+        # URLの取得 (Pixiv等の場合)
+        if "url" in yt_json:
+            scene["url"] = yt_json["url"]
+        
+        # 日付の取得
+        if "date" in yt_json:
+            scene["date"] = yt_json["date"]
 
-    # 3. 最終的な出力をセット
-    if tags_data:
+        # 2. タグ情報の抽出 (変数名を tags_data に統一して修正)
+        tags_data = []
+        
+        # Pixivのタグリストなどを取得
+        raw_tags = yt_json.get("tags")
+        if isinstance(raw_tags, list):
+            for t in raw_tags:
+                if t:
+                    tags_data.append({"name": str(t).strip()})
+        elif isinstance(raw_tags, str):
+            # カンマ区切りの文字列の場合
+            for t in raw_tags.split(','):
+                if t:
+                    tags_data.append({"name": t.strip()})
+
+        # レーティング情報があればタグとして追加
+        rating = yt_json.get("rating")
+        if rating:
+            tags_data.append({"name": str(rating).strip()})
+
+        # 構築したタグリストをセット
         scene["tags"] = tags_data
-    
-    # Ratingをタグとして追加
-    if rating := yt_json.get("rating"):
-        tags_list.append({"name": rating})
-    scene["tags"] = tags_list
 
-    # Date ("2018-11-17 13:05:23" -> "2018-11-17")
-    date_raw = yt_json.get("date") or yt_json.get("date_url")
-    if date_raw:
-        scene["date"] = date_raw[:10]
+        # 詳細説明（あれば）
+        if "description" in yt_json:
+            scene["details"] = yt_json["description"]
 
-    # Details (Pixivのキャプション)
-    if caption := yt_json.get("caption"):
-        scene["details"] = caption
-
-# --- 修正：画像（Image）スクレーパー用のフィールド名に変更 ---
-    if img_url := yt_json.get("url"):
-        # Image scraper では "image" ではなく "remote_url" または "urls" を使う
-        scene["remote_url"] = img_url 
-        
-        # urls リストにも追加しておくと、ソース元として Stash に登録されます
-        if "urls" not in scene:
-            scene["urls"] = []
-        if img_url not in scene["urls"]:
-            scene["urls"].append(img_url)
+    except Exception as e:
+        print(f"エラーが発生しました: {str(e)}", file=sys.stderr)
+        # エラーが起きても空のデータで継続させる
+        pass
 
     return scene
 
-if __name__ == "__main__":
-    # Stashから渡される標準入力(JSON)を処理
+def main():
+    # Stashから渡される引数を解析
+    # 通常、Stashは JSON文字列を標準入力から渡すか、引数で渡します
     try:
-        input_data = sys.stdin.read()
-        if not input_data.strip():
-            sys.exit(0)
-            
-        # Windowsで必要だった不規則なre.subは、Linux環境での予期せぬエラーを防ぐため廃止
-        js = json.loads(input_data)
-        image_id = js.get("id")
+        fragment = json.loads(sys.stdin.read())
+        # image_id または path を取得
+        image_path = fragment.get("path")
         
-        if image_id:
-            result = image_from_json(image_id)
-            if result:
-                # 正常な結果を出力
-                print(json.dumps(result))
-            else:
-                # 該当なしの場合は空のオブジェクトを返す
-                print(json.dumps({}))
-        else:
-            log.debug("入力JSONに ID が含まれていません。")
-            
-    except json.JSONDecodeError as e:
-        log.debug(f"Stashからの入力解析に失敗しました: {e}")
-        # エラー表示用のダミータグを返す
-        print(json.dumps({"tags": [{"name": "Error: JSON Decode Failure"}]}))
-    except Exception:
-        traceback.print_exc()
+        if not image_path:
+            print("エラー: 画像のパスが取得できませんでした。", file=sys.stderr)
+            return
+
+        print(f"Resolved absolute path: {image_path}", file=sys.stderr)
+        
+        # データの取得
+        result = get_image_data(image_path)
+        
+        # Stashへ結果をJSON形式で出力（標準出力）
+        print(json.dumps(result))
+
+    except Exception as e:
+        # 予期せぬエラーでもStashをクラッシュさせないように最低限のJSONを返す
+        print(f"Main Error: {str(e)}", file=sys.stderr)
+        print(json.dumps({}))
+
+if __name__ == "__main__":
+    main()
