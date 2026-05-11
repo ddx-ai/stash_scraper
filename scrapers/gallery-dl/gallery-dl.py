@@ -125,9 +125,16 @@ def image_from_json(image_id):
     if caption := yt_json.get("caption"):
         scene["details"] = caption
 
-    # Image (JSON内のURLをサムネイルとしてセット)
+# --- 修正：画像（Image）スクレーパー用のフィールド名に変更 ---
     if img_url := yt_json.get("url"):
-        scene["image"] = img_url
+        # Image scraper では "image" ではなく "remote_url" または "urls" を使う
+        scene["remote_url"] = img_url 
+        
+        # urls リストにも追加しておくと、ソース元として Stash に登録されます
+        if "urls" not in scene:
+            scene["urls"] = []
+        if img_url not in scene["urls"]:
+            scene["urls"].append(img_url)
 
     return scene
 
