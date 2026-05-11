@@ -43,8 +43,13 @@ def image_from_json(image_id):
         log.debug(f"Image ID {image_id} に関連付けられたファイルパスがありません。")
         return None
 
-    # Stash上のフルパスを取得
+    # Stash上のパスを取得
     file_path_str = files[0].get("path")
+    
+    # --- 修正ポイント: 先頭にスラッシュがない場合に補完する ---
+    if not file_path_str.startswith('/'):
+        file_path_str = '/' + file_path_str
+        
     file_path = Path(file_path_str)
     
     # --- JSONファイル探索ロジック (拡張子.json ルールに完全準拠) ---
