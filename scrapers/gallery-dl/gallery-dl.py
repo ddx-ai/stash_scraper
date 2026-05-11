@@ -43,14 +43,22 @@ def image_from_json(image_id):
         log.debug(f"Image ID {image_id} に関連付けられたファイルパスがありません。")
         return None
 
-    # Stash上のパスを取得
+ # Stash上のパスを取得
     file_path_str = files[0].get("path")
     
-    # --- 修正ポイント: 先頭にスラッシュがない場合に補完する ---
-    if not file_path_str.startswith('/'):
-        file_path_str = '/' + file_path_str
-        
-    file_path = Path(file_path_str)
+    # --- OS互換性を保った絶対パス解決 ---
+    if os.name == 'nt':
+        # Windows環境の場合
+        # \ が / に混在していても Path オブジェクトが適切に処理します
+        file_path = Path(file_path_str)
+    else:
+        # Linux / Docker (Alpine) 環境の場合
+        if not file_path_str.startswith('/'):
+            # 先頭が / でなければ付与して絶対パス化する
+            file_path_str = '/' + file_path_str
+        file_path = Path(file_path_str)
+
+    log.debug(f"Resolved absolute path: {file_path}")
     
     # --- JSONファイル探索ロジック (拡張子.json ルールに完全準拠) ---
     # Linux環境の大文字小文字を考慮し、複数のパターンをチェック
