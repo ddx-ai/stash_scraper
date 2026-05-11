@@ -105,11 +105,30 @@ def image_from_json(image_id):
         scene["studio"] = {"name": user_name}
         scene["performers"] = [{"name": user_name}]
         
-    # Tags (配列をStashのフォーマットに変換)
-    tags_list = []
-    if raw_tags := yt_json.get("tags"):
-        if isinstance(raw_tags, list):
-            tags_list = [{"name": t} for t in raw_tags]
+# --- Tags (Pixiv JSONの "tags" 配列をStash形式に変換) ---
+    tags_data = []
+    
+    # 1. Pixiv JSON内の "tags" フィールドを確認
+    raw_tags = yt_json.get("tags")
+    
+    if isinstance(raw_tags, list):
+        # リスト形式の場合 (例: ["AZKi", "hololive"])
+        for t in raw_tags:
+            if t:
+                tags_data.append({"name": str(t).strip()})
+    elif isinstance(raw_tags, str):
+        # 文字列でカンマ区切りなどの場合
+        for t in raw_tags.split(','):
+            if t:
+                tags_data.append({"name": t.strip()})
+
+    # 2. R-18などのレーティング情報があれば追加
+    if rating := yt_json.get("rating"):
+        tags_data.append({"name": str(rating).strip()})
+
+    # 3. 最終的な出力をセット
+    if tags_data:
+        scene["tags"] = tags_data
     
     # Ratingをタグとして追加
     if rating := yt_json.get("rating"):
