@@ -2,133 +2,147 @@ import json
 import os
 import sys
 import datetime
-import codecs
 import traceback
 import re
-import shutil
 from pathlib import Path
 
-from py_common import graphql
-from py_common import log
+# --- Docker/Linux環境対策: スクリプトのディレクトリを検索パスの最優先に追加 ---
+current_dir = os.path.dirname(os.path.realpath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
-## This scraper assumes that the JSON files are stored in the same directory as the image files,
-## with the same name, but with .info.json or .json extensions. You can add a second directory to check
-## for JSON files here. JSON file names here must match the original media file name, but with a
-## .info.json or .json extension. JSON files will be taken from the media's folder first, and if not
-## present there a suitably named JSON file in the below directory will be used.
-## Image Scraper
-## Code,Date,Details,Performers (see Performer fields),Photographer,Rating,Studio (see Studio Fields),Tags (see Tag fields),Title,URLs
-
-alternate_json_dir = ""
-
+try:
+    from py_common import graphql
+    from py_common import log
+except ImportError:
+    # py_commonが見つからない場合のフォールバック（デバッグ用）
+    class DummyLog:
+        def debug(self, msg): print(f"DEBUG: {msg}")
+    log = DummyLog()
+    print("Error: py_common.py not found in the same directory.")
 
 def image_from_json(image_id):
-    response = graphql.callGraphQL(
-    """
-    query FilenameByimageId($id: ID){
-      findImage(id: $id){
+    # GraphQLクエリ: ID! (必須型) に修正し、最新のStash APIに準拠
+    query = """
+    query FilenameByimageId($id: ID!) {
+      findImage(id: $id) {
         files {
           path
         }
       }
-    }""",
-        {"id": image_id},
-    )
-    log.debug(f"ID: {image_id}")
-    assert response is not None
-    file = next(iter(response["findImage"]["files"]), None)
-    if not file:
-        log.debug(f"No files found for scene {image_id}")
+    }
+    """
+    response = graphql.callGraphQL(query, {"id": image_id})
+    
+    if not response or not response.get("findImage"):
+        log.debug(f"Image ID {image_id} がデータベースに見つかりません。")
         return None
 
-    file_path = Path(file["path"])
-    log.debug(f"file_path: {file_path}")
-    json_files = [file_path.with_suffix(suffix) for suffix in (".info.json", ".json",".png.json",".jpeg.json",".jpg.json",".webp.json")]
-    thumbs_files = [file_path.with_suffix(suffix) for suffix in (".webp",".jpg",".jpeg")]
-    if alternate_json_dir:
-        json_files += [Path(alternate_json_dir) / p.name for p in json_files]
+    files = response["findImage"].get("files", [])
+    if not files:
+        log.debug(f"Image ID {image_id} に関連付けられたファイルパスがありません。")
+        return None
 
-    json_file = next((f for f in json_files if f.exists()), None)
-    #thumb_file = next((f for f in thumbs_files if f.exists()), None)
-    #thumb_file = str(thumb_file)
-    #new_file_name="S:\\temp\\image\\temp.webp"
-    #shutil.copyfile(thumb_file, new_file_name)
+    # Stash上のフルパスを取得
+    file_path_str = files[0].get("path")
+    file_path = Path(file_path_str)
+    
+    # --- JSONファイル探索ロジック (拡張子.json ルールに完全準拠) ---
+    # Linux環境の大文字小文字を考慮し、複数のパターンをチェック
+    json_candidates = [
+        Path(file_path_str + ".json"),          # 71698513_p0.png.json (今回の本命)
+        file_path.with_suffix(".json"),         # 71698513_p0.json
+        Path(file_path_str + ".JSON"),          # 大文字拡張子
+        file_path.with_suffix(".info.json")      # 互換性用
+    ]
+
+    json_file = next((f for f in json_candidates if f.exists()), None)
 
     if not json_file:
-        paths = "', '".join(str(p) for p in json_files)
-        log.debug(f"No JSON file found for '{file_path}': tried '{paths}'")
+        log.debug(f"JSONが見つかりません。試行パス: {[str(p) for p in json_candidates]}")
         return None
 
+    log.debug(f"JSONファイルを読み込みます: {json_file}")
+    
+    try:
+        # Docker/Linux環境での文字化けを防ぐためutf-8を明示
+        yt_json = json.loads(json_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        log.debug(f"JSON読み込み失敗: {e}")
+        return None
+
+    # --- Stash用データ構造の構築 ---
     scene = {}
 
-    log.debug(f"Found JSON file: '{json_file}'")
-    #log.debug(f"Found Image file: '{thumb_file}'")
-    yt_json = json.loads(json_file.read_text(encoding="utf-8"))
-
+    # Title
     if title := yt_json.get("title"):
         scene["title"] = title
-        log.debug(f"title: '{title}'")
 
- ##   if thumbnail := yt_json.get("thumbnail"):
- ##       if not thumb_file:
- ##           scene["image"] = thumbnail
-    url=[]
-    if user_id := yt_json.get("user",{}).get("id"):
-        url.append(f"https://www.pixiv.net/users/{user_id}")
-    if temp_url := yt_json.get("url"):
-        url.append(temp_url)
-    elif temp_url := yt_json.get("file_url"):
-        url.append(temp_url)
-    scene["urls"] = url
+    # URLs (Pixivユーザーページと作品ページ)
+    urls = []
+    if user_id := yt_json.get("user", {}).get("id"):
+        urls.append(f"https://www.pixiv.net/users/{user_id}")
+    if target_url := yt_json.get("url"):
+        urls.append(target_url)
+    scene["urls"] = urls
                 
-    if studio := yt_json.get("user",{}).get("name"):
-        scene["Studio"] = {"name":studio}
-    elif studio := yt_json.get("author",{}).get("display_name"):
-        scene["Studio"] = {"name":studio}
+    # Studio & Performers (作者名をマッピング)
+    user_name = yt_json.get("user", {}).get("name") or yt_json.get("author", {}).get("name")
+    if user_name:
+        scene["studio"] = {"name": user_name}
+        scene["performers"] = [{"name": user_name}]
         
-    if casts := yt_json.get("uploader"):
-        scene["performers"] = [{"name":casts}]
-    elif casts := yt_json.get("author"):
-        scene["performers"] =casts        
-        
-    if image := yt_json.get("data",{}).get("video_page",{}).get("thumbnail_url"):
-        scene["image"] = image
-
-            
-    tags = []
-    tags = yt_json.get("tags")
+    # Tags (配列をStashのフォーマットに変換)
+    tags_list = []
+    if raw_tags := yt_json.get("tags"):
+        if isinstance(raw_tags, list):
+            tags_list = [{"name": t} for t in raw_tags]
+    
+    # Ratingをタグとして追加
     if rating := yt_json.get("rating"):
-        tags.append(rating)
-    scene["tags"] = [{"name": tag} for tag in tags]
+        tags_list.append({"name": rating})
+    scene["tags"] = tags_list
 
-    if date_url := yt_json.get("date_url",):
-        s = datetime.datetime.strptime(date_url, "%Y-%m-%d %H:%M:%S")
-        scene["date"] = s.strftime("%Y-%m-%d")
-    elif date_url := yt_json.get("date",):
-        s = datetime.datetime.strptime(date_url, "%Y-%m-%d %H:%M:%S")
-        scene["date"] = s.strftime("%Y-%m-%d")
+    # Date ("2018-11-17 13:05:23" -> "2018-11-17")
+    date_raw = yt_json.get("date") or yt_json.get("date_url")
+    if date_raw:
+        scene["date"] = date_raw[:10]
 
-    if details := yt_json.get("caption"):
-        scene["details"] = details
+    # Details (Pixivのキャプション)
+    if caption := yt_json.get("caption"):
+        scene["details"] = caption
+
+    # Image (JSON内のURLをサムネイルとしてセット)
+    if img_url := yt_json.get("url"):
+        scene["image"] = img_url
 
     return scene
 
 if __name__ == "__main__":
-
-    input = sys.stdin.read()
-    input2 = codecs.encode(input, 'unicode-escape')
-    input=re.sub(r'"title":.*?"url":', '"url":',input)
-    #input = input.re.subplace("\\n","\\n").replace("\'", "\\'").replace("\"", '\\"').replace("\&", "\\&").replace("\r", "\\r").replace("\t", "\\t").replace("\b", "\\b").replace("\f", "\\f")
-    log.debug(f"input: '{input}'")
-    #log.debug(f"input2: '{input2}'")
+    # Stashから渡される標準入力(JSON)を処理
     try:
-        js = json.loads(input)
-        image_id = js["id"]
-        ret = image_from_json(image_id)
-        log.debug(json.dumps(ret))
-        print(json.dumps(ret))
-    except json.decoder.JSONDecodeError:
-        scene = {}
-        scene["tags"]=[{"name":"エラー"}]
-        print(json.dumps(scene))
+        input_data = sys.stdin.read()
+        if not input_data.strip():
+            sys.exit(0)
+            
+        # Windowsで必要だった不規則なre.subは、Linux環境での予期せぬエラーを防ぐため廃止
+        js = json.loads(input_data)
+        image_id = js.get("id")
+        
+        if image_id:
+            result = image_from_json(image_id)
+            if result:
+                # 正常な結果を出力
+                print(json.dumps(result))
+            else:
+                # 該当なしの場合は空のオブジェクトを返す
+                print(json.dumps({}))
+        else:
+            log.debug("入力JSONに ID が含まれていません。")
+            
+    except json.JSONDecodeError as e:
+        log.debug(f"Stashからの入力解析に失敗しました: {e}")
+        # エラー表示用のダミータグを返す
+        print(json.dumps({"tags": [{"name": "Error: JSON Decode Failure"}]}))
+    except Exception:
         traceback.print_exc()
