@@ -41,7 +41,18 @@ def scene_from_json(scene_id):
         log.debug(f"No files found for scene {scene_id}")
         return None
 
-    file_path = Path(file["path"])
+    #file_path = Path(file["path"])
+    # ファイルパスの取得
+    raw_path = Path(file["path"])
+
+    # --- Docker環境（Linux）向けのパス補完ロジック ---
+    # Windowsの場合は os.name == 'nt' なのでスルーされます
+    if os.name == 'posix' and not raw_path.startswith('/'):
+        raw_path = '/' + raw_path
+        log.debug(f"Path fixed for Docker: {raw_path}")
+
+    file_path = Path(raw_path)
+    
     log.debug(f"file_path: {file_path}")
     json_files = [file_path.with_suffix(suffix) for suffix in (".info.json", ".json",".mp4.json",".webm.json",".mkv.json")]
     thumbs_files = [file_path.with_suffix(suffix) for suffix in (".webp",".jpg",".jpeg")]
