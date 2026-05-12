@@ -43,7 +43,7 @@ def scene_from_json(scene_id):
 
     #file_path = Path(file["path"])
     # ファイルパスの取得
-    raw_path = Path(file["path"])
+    raw_path = file["path"]
 
     # --- Docker環境（Linux）向けのパス補完ロジック ---
     # Windowsの場合は os.name == 'nt' なのでスルーされます
